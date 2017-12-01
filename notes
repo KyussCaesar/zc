@@ -1,0 +1,66 @@
+over ambitious programming language
+
+C with extras:
+    Namespaces and classes
+    borrowchecker from Rust
+    stronger type system
+    python loops and f strings
+    no hacky imports
+    casting syntax is just typename(object_to_cast)
+    traits
+    structs and classes like C# (struct:copy, class:ref)
+
+
+components
+    lexer
+        break input stream into tokens
+
+    ast-constructor
+        checks grammar and builds ast
+
+    type-checker
+        checks types of expressions are valid
+
+    traits-implemented checker
+        checks that classes implement traits that they said they would
+
+    borrow-checker
+        checks that borrowing rules are not broken
+
+    ast-serialiser
+        writes an ast to file
+
+// Not 100% on this syntax yet
+class Point
+{
+    trait Representable;
+    trait Arithmetic;
+
+    double x, y;
+}
+
+// if expressions from rust
+var a refs if (condition)
+{
+    doStuff();
+    yield some_var;
+}
+else
+{
+    yield some_other;
+}
+
+// I thought about using return since it's kinda like a function returning, but
+// that could be confusing, so I decided to use yield
+
+grammar:
+
+file:
+    statements
+    class definitions
+    trait definitions
+    lonely function definitions
+
+statement:
+    variable declaration
+    expression
