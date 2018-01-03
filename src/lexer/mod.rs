@@ -289,7 +289,7 @@ mod tests
     use lexer::lex;
     use token::TokenType;
     use token::TokenType::*;
-    use token::printTS;
+    use token::print_ts;
 
     // Main lexer testing function
     fn lexer_test
@@ -301,7 +301,7 @@ mod tests
     ) 
     {
         let tokenstream = lex(test_string);
-        printTS(&tokenstream);
+        print_ts(&tokenstream);
 
         // Check that the lexer returns the expected number of tokens
         assert_eq!(tokenstream.len(), num_tokens);

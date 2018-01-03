@@ -12,15 +12,16 @@ pub enum TokenType
 use std::collections::VecDeque;
 pub type TokenStream = VecDeque<Token>;
 
-pub fn printTS(ts: &TokenStream)
+pub fn print_ts(ts: &TokenStream)
 {
+    println!("");
     for t in ts
     {
-        printToken(t);
+        print_token(t);
     }
 }
 
-pub fn printToken(t: &Token)
+pub fn print_token(t: &Token)
 {
     println!("Token\ttype({:?})\tstring({})", t.token_type, t.string);
 }

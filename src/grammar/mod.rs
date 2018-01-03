@@ -1,8 +1,7 @@
-use parser::Production;
+use std::collections::HashMap;
+
 use token::{TokenStream,TokenType};
 use lexer::lex;
-
-use std::collections::HashMap;
 
 // Grammar:
 // Represents a grammar.
@@ -21,13 +20,12 @@ enum Modifier
     ZeroOrMore,
     OneOrMore,
 }
-
 struct ModifiedGroup(Option<Modifier>, Group);
 
 enum Group
 {
-    single(Unit),
-    many(Vec<ModifiedGroup>),
+    Single(Unit),
+    Many(Vec<ModifiedGroup>),
 }
 
 enum Unit
@@ -52,14 +50,14 @@ enum Unit
 // build up the grammar in memory as a tree
 // apply rules to token stream
 
-// Specify each rule in a single string.
+// Specify each rule in a Single string.
 // This function tokenises each string and performs some basic checks:
 // * strings take the format: ident ':' anything ';'
-// * if there are any single character tokens, they must be one of:
+// * if there are any Single character tokens, they must be one of:
 //      '(' ')' '*' '?' '+' '|' ':' ';'
 fn basic_checks(rules: Vec<String>) -> Result<Vec<TokenStream>, String>
 {
-    // This vector is for checking single-character tokens.
+    // This vector is for checking Single-character tokens.
     // Single character tokens are only allowed if they are
     // in this set.
     let allowed_chars = vec!
@@ -104,7 +102,12 @@ fn basic_checks(rules: Vec<String>) -> Result<Vec<TokenStream>, String>
             {
                 Some(t) =>
                 {
-                    if t.token_type != TokenType::Identifier { return Err("First token was not an identifier".to_string()); };
+                    if 
+                        t.token_type != TokenType::Identifier &&
+                        t.token_type != TokenType::Keyword
+                    { 
+                        return Err("First token was not an identifier".to_string());
+                    }
                 },
                 None => return Err("Expected a token but found nothing".to_string()),
             }
@@ -121,7 +124,7 @@ fn basic_checks(rules: Vec<String>) -> Result<Vec<TokenStream>, String>
             }
 
             // Now iterate over the remaining tokens.
-            // If there are single character tokens, they must be members of the
+            // If there are Single character tokens, they must be members of the
             // set defined above.
             let mut contains_semicolon = false;
             while let Some(t) = titer.next()
@@ -162,7 +165,7 @@ enum BuildResult<T>
 // Builds a grammar in memory.
 fn build_grammar(rules: Vec<TokenStream>) -> BuildResult<Grammar>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
 
     let mut hashmap: HashMap<String, Rule> = HashMap::new();
 
@@ -173,10 +176,12 @@ fn build_grammar(rules: Vec<TokenStream>) -> BuildResult<Grammar>
         {
             Some(t) =>
             {
-                if t.token_type != TokenType::Identifier
+                if 
+                    t.token_type != TokenType::Identifier &&
+                    t.token_type != TokenType::Keyword
                 {
                     // TODO: Emit error message
-                    // First token in grammar rule should be an identifier
+                    error!("First token in grammar rule should be an identifier");
                     return Error;
                 }
                 t.string
@@ -184,7 +189,7 @@ fn build_grammar(rules: Vec<TokenStream>) -> BuildResult<Grammar>
             None =>
             {
                 // TODO: Emit error message
-                // No tokens in input
+                error!("[build_grammar] No tokens at beginning of rule");
                 return Error;
             }
         };
@@ -197,14 +202,14 @@ fn build_grammar(rules: Vec<TokenStream>) -> BuildResult<Grammar>
                 if t.string != ":".to_string()
                 {
                     // TODO: Emit error message
-                    // Expected colon after rule name
+                    error!("Expected colon after rule name");
                     return Error;
                 }
             },
             None =>
             {
                 // TODO: Emit error message
-                // Expected colon after rule name
+                error!("Expected colon after rule name");
                 return Error;
             }
         }
@@ -225,7 +230,7 @@ fn build_grammar(rules: Vec<TokenStream>) -> BuildResult<Grammar>
 
 fn build_rule(mut ts: TokenStream) -> BuildResult<Rule>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
 
     let mut cases: Vec<Case> = Vec::new();
     loop
@@ -242,14 +247,14 @@ fn build_rule(mut ts: TokenStream) -> BuildResult<Rule>
                         if token.string != ";".to_string()
                         {
                             // TODO: Emit error message
-                            // Expected semicolon after case
+                            error!("Expected semicolon after case");
                             return Error;
                         }
                     },
                     None =>
                     {
                         // TODO: Emit error message
-                        // Expected semicolon after case
+                        error!("Expected semicolon after case");
                         // (Note: might allow this in future)
                         return Error;
                     }
@@ -266,18 +271,24 @@ fn build_rule(mut ts: TokenStream) -> BuildResult<Rule>
     if cases.len() == 0
     {
         // TODO: Emit error message
-        // Rule must have at least one case
+        error!("Rule must have at least one case");
         return Error;
     }
 
     // TODO: Log
-    // Successfully built rule
+    info!("Successfully built rule");
     return New(Rule(cases));
 }
 
 fn build_case(ts: &mut TokenStream) -> BuildResult<Case>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
+
+    // If the token stream is empty then we are finished
+    if ts.is_empty()
+    {
+        return Finished;
+    }
 
     let mut modgroups: Vec<ModifiedGroup> = Vec::new();
 
@@ -286,14 +297,7 @@ fn build_case(ts: &mut TokenStream) -> BuildResult<Case>
         match build_modified_group(ts)
         {
             New(mg) => modgroups.push(mg),
-            Finished =>
-            {
-                if modgroups.len() == 0
-                {
-                    return Finished;
-                }
-                break;
-            },
+            Finished => break,
             Error => return Error,
         }
     }
@@ -303,7 +307,7 @@ fn build_case(ts: &mut TokenStream) -> BuildResult<Case>
 
 fn build_modified_group(ts: &mut TokenStream) -> BuildResult<ModifiedGroup>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
 
     let modifier: Option<Modifier>;
     match ts.pop_front()
@@ -312,16 +316,19 @@ fn build_modified_group(ts: &mut TokenStream) -> BuildResult<ModifiedGroup>
         {
             if t.string == "*".to_string()
             {
+                trace!("[build_modified_group] found zero or more");
                 modifier = Some(Modifier::ZeroOrMore);
             }
 
             else if t.string == "+".to_string()
             {
+                trace!("[build_modified_group] found one or more");
                 modifier = Some(Modifier::OneOrMore);
             }
 
             else if t.string == "?".to_string()
             {
+                trace!("[build_modified_group] found zero or one");
                 modifier = Some(Modifier::ZeroOrOne);
             }
 
@@ -335,7 +342,7 @@ fn build_modified_group(ts: &mut TokenStream) -> BuildResult<ModifiedGroup>
         None =>
         {
             // TODO: Emit error message
-            // No tokens in input
+            error!("[build_modified_group] Expected to find a token when building modified group.");
             return Error;
         }
     };
@@ -352,7 +359,7 @@ fn build_modified_group(ts: &mut TokenStream) -> BuildResult<ModifiedGroup>
 
 fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
 
     let t = match ts.pop_front()
     {
@@ -360,7 +367,7 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
         None =>
         {
             // TODO: Emit error message
-            // No tokens in input
+            error!("[build_group] Expected to find a token when building a group, found nothing.");
             return Error;
         }
     };
@@ -368,9 +375,10 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
     // Repeated case: braces followed by at least one modified group
     if t.string == "(".to_string()
     {       
+        trace!("[build_group] found compound group opening brace");
+        let mut mgs: Vec<ModifiedGroup> = Vec::new();
         loop
         {
-            let mut mgs: Vec<ModifiedGroup> = Vec::new();
             match build_modified_group(ts)
             {
                 New(mg) =>
@@ -387,19 +395,19 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
                             if t.string != ")".to_string()
                             {
                                 // TODO: Emit error message
-                                // Expected closing brace
+                                error!("Expected closing brace");
                                 return Error;
                             }
                         },
                         None =>
                         {
                             // TODO: Emit error message
-                            // Expected closing brace
+                            error!("Expected closing brace");
                             return Error;
                         }
                     }
 
-                    return New(Group::many(mgs));
+                    return New(Group::Many(mgs));
                 },
                 Error => return Error,
             }
@@ -418,7 +426,7 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
         {
             New(unit) => 
             {
-                return New(Group::single(unit));
+                return New(Group::Single(unit));
             },
             Finished => return Finished,
             Error => return Error,
@@ -428,7 +436,7 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
 
 fn build_unit(ts: &mut TokenStream) -> BuildResult<Unit>
 {
-    use grammar2::BuildResult::*;
+    use grammar::BuildResult::*;
 
     match ts.pop_front()
     {
@@ -436,50 +444,60 @@ fn build_unit(ts: &mut TokenStream) -> BuildResult<Unit>
         {
             if t.token_type == TokenType::StringLiteral
             {
+                trace!("[build_unit] found terminal: {}", &t.string);
                 return New(Unit::Terminal(t.string));
             }
 
-            if t.token_type == TokenType::Identifier
+            else if 
+                t.token_type == TokenType::Identifier ||
+                t.token_type == TokenType::Keyword
             {
                 if t.string == "identifier"
                 {
+                    trace!("[build_unit] found identifier keyword");
                     return New(Unit::Identifier);
                 }
 
                 else
                 {
+                    trace!("[build_unit] found non-terminal: {}", &t.string);
                     return New(Unit::NonTerminal(t.string));
                 }
             }
 
-            if t.token_type == TokenType::Character
+            else if t.token_type == TokenType::Character
             {
                 if t.string == ";".to_string()
                 {
+                    trace!("[build_unit] found semicolon");
                     ts.push_front(t);
                     return Finished;
                 }
 
                 if t.string == "(".to_string()
                 {
+                    trace!("[build_unit] found opening brace");
                     ts.push_front(t);
                     return Finished;
                 }
 
                 if t.string == ")".to_string()
                 {
+                    trace!("[build_unit] found closing brace");
                     ts.push_front(t);
                     return Finished;
                 }
 
                 if t.string == "|".to_string()
                 {
+                    trace!("[build_unit] found pipe (or)");
                     return New(Unit::Or);
                 }
 
                 else
                 {
-                    // TODO: Expected one of ; ( ) | but found other
+                    // TODO:
+                    error!("Expected one of ; ( ) | but found other");
                     return Error;
                 }
             }
@@ -487,14 +505,14 @@ fn build_unit(ts: &mut TokenStream) -> BuildResult<Unit>
             else
             {
                 // TODO: Emit error message
-                // invalid unit
+                error!("[build_unit] token had an invalid type, or was an invalid character.");
                 return Error;
             }
         },
         None =>
         {
             // TODO: Emit error message
-            // No tokens in input
+            error!("[build_unit] Expected a token when building unit but found nothing.");
             return Error;
         }
     }
@@ -513,6 +531,8 @@ mod tests
 {
     use super::*;
 
+    extern crate simple_logger;
+
     // Tests for basic checks
 
     fn basic_checks_meta(rules: Vec<String>) -> Vec<TokenStream>
@@ -525,23 +545,34 @@ mod tests
     }
 
     #[test]
-    fn basic_checkA()
+    fn basic_check_a()
     {
         // One rule, almost simplest possible
         basic_checks_meta(vec!["basic: identifier;".to_string()]);
     }
 
     #[test]
-    fn basic_checkB()
+    fn basic_check_b()
     {
         basic_checks_meta(vec!["basic: identifier; 'lit' identifier;".to_string()]);
     }
 
     #[test]
-    fn basic_checkC()
+    fn basic_check_real()
     {
         // A more real-world test
         basic_checks_meta(vec!["vardecl: 'var' identifier ?(':' identifier);".to_string()]);
+    }
+
+    #[test]
+    fn basic_check_many()
+    {
+        basic_checks_meta(vec!
+            [
+            "vardecl: 'var' identifier ?(':' identifier);".to_string(),
+            "yield: 'yield' expression ';';".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -556,5 +587,205 @@ mod tests
     fn too_short()
     {
         basic_checks_meta(vec!["basic: identifier".to_string()]);
+    }
+
+    fn big_tests_init
+    (
+        grammarspec      : Vec<String>, // The grammar to parse
+        expect_num_rules : usize,       // The number of rules in the grammar
+        keys             : Vec<String>, // The keys that you should expect to find in the grammar
+    )
+    -> Grammar
+    {
+        // meta function for the big tests.
+        // performs some basic sanity checks like "a grammar with three rules should have three
+        // rules in it.
+
+        // Initialise logger
+        simple_logger::init().unwrap();
+        println!(""); // So that logging output begins on a new line
+
+        use grammar::BuildResult::*;
+
+        let vts = basic_checks_meta(grammarspec); // "vts" -> "Vector of 'T'oken 'S'treams"
+
+        // Assert that there are the expected number of rules in the Vec<TokenStream>
+        assert_eq!(expect_num_rules, vts.len());
+
+        // build the grammar
+        let Grammar(g) = match build_grammar(vts)
+        {
+            New(g) => g,
+            Finished => panic!("[big_tests_meta] build_grammar should not return finished"),
+            Error => panic!("vardecl grammar check FAILED"),
+        };
+
+        // Assert that there are the expected number of rules in the resulting Grammar
+        assert_eq!(expect_num_rules, g.len());
+
+        // Assert that the grammar contains the expected keys
+        for key in keys
+        {
+            println!("checking '{}' is in grammar", &key);
+            assert!(g.contains_key(&key));
+        }
+
+        return Grammar(g);
+    }
+
+    #[test]
+    fn vardecl()
+    {
+        // This test tests that vardecl is correctly parsed.
+
+        use grammar::Group::*;
+        use grammar::Unit::*;
+        use grammar::Modifier::*;
+
+        // Do basic checks
+        let Grammar(grammar) = big_tests_init(
+            vec!["vardecl: 'var' identifier ?(':' identifier);".to_string()],
+            1,
+            vec!["vardecl".to_string()],
+        );
+
+        // Deconstruct the rule
+        let vec_cases = match grammar.get("vardecl")
+        {
+            Some(&Rule(ref v)) => v,
+            None => panic!("what the hell"),
+        };
+
+        // vardecl only has one case
+        assert_eq!(1, vec_cases.len());
+
+        // Deconstruct the case
+        let &Case(ref vec_mg) = vec_cases.into_iter().next().unwrap();
+
+        // There should be three modified groups at the top level
+        assert_eq!(3, vec_mg.len());
+
+        // FIRST MODIFIED GROUP
+        let ModifiedGroup(ref modifier, ref group) = vec_mg[0];
+        match modifier
+        {
+            &Some(_) => panic!("first modified group should not have a modifier"),
+            &None => (),
+        }
+
+        match group
+        {
+            &Single(ref u) =>
+            {
+                match u
+                {
+                    &Terminal(ref s) => assert_eq!("var", s),
+                    _ => panic!("first modified group should have been interpreted as a terminal"),
+                }
+            },
+            &Many(_) => panic!("first modified group should be a Single, not Many"),
+        }
+
+        // SECOND MODIFIED GROUP
+        let ModifiedGroup(ref modifier, ref group) = vec_mg[1];
+        match modifier
+        {
+            &Some(_) => panic!("second modified group should not have a modifier"),
+            &None => (),
+        }
+
+        match group
+        {
+            &Single(ref u) =>
+            {
+                match u
+                {
+                    &Identifier => (), // Yay!
+                    _ => panic!("second modified group should have been interpreted as identifier"),
+                }
+            },
+            &Many(_) => panic!("second modified group should be a Single, not Many"),
+        }
+
+        // THIRD MODIFIED GROUP
+        let ModifiedGroup(ref modifier, ref group) = vec_mg[2];
+        match modifier
+        {
+            &Some(ref a) =>
+            {
+                match a
+                {
+                    &ZeroOrOne => (),
+                    _ => panic!("third modified group should have 'ZeroOrOne' modifier"),
+                }
+            },
+            &None => panic!("third modified group should have 'ZeroOrOne' modifier"),
+        }
+
+        match group
+        {
+            &Single(_) => panic!("third modified group should be Many, not Single"),
+            &Many(ref v) =>
+            {
+                // modified group should contain 2 sub-groups
+                assert_eq!(2, v.len());
+
+                // first sub-group should be the ':' literal
+                let ModifiedGroup(ref modifier, ref group) = v[0];
+                match modifier
+                {
+                    &Some(_) => panic!("third group, first subgroup, should have no modifier"),
+                    &None => (),
+                }
+
+                match group
+                {
+                    &Single(ref u) =>
+                    {
+                        match u
+                        {
+                            &Terminal(ref s) =>
+                            {
+                                if *s != ":".to_string()
+                                {
+                                    panic!("expected colon character");
+                                }
+                            },
+                            _ => panic!("expected terminal"),
+                        }
+                    },
+                    &Many(_) => panic!("third group, first subgroup, should be a Single unit"),
+                }
+
+                // second subgroup
+                let ModifiedGroup(ref modifier, ref group) = v[1];
+                match modifier
+                {
+                    &Some(_) => panic!("third group, second sub, should not have a modifier"),
+                    &None => (),
+                }
+
+                match group
+                {
+                    &Single(ref u) =>
+                    {
+                        match u
+                        {
+                            &Identifier => (),
+                            _ => panic!("third group, second sub should be identifier"),
+                        }
+                    }
+                    &Many(_) => panic!("third group, second sub, should be Single, not Many"),
+                }
+            }
+        }
+
+        // Success!!!!
+    }
+
+    #[test]
+    fn expression()
+    {
+
     }
 }
