@@ -6,9 +6,23 @@ use super::token::*;
 // position within the file.
 struct SourceFile
 {
-    file: String,           // This is the type returned from String::chars().peekable()
-    pos: TokenFilePosition, // The current position in the file.
+    file: String,
+    pos: TokenFilePosition,
 }
+
+const RESERVED_WORDS: [&str;10] = 
+[
+    "if",
+    "for",
+    "use",
+    "yield",
+    "return",
+    "func",
+    "class",
+    "var",
+    "is",
+    "->",
+];
 
 impl SourceFile
 {
@@ -17,27 +31,21 @@ impl SourceFile
         SourceFile
         {
             file: file.chars().rev().collect(),
-            pos: TokenFilePosition { line: 1, col: 0 }
+            pos: TokenFilePosition { line: 1, col: 0 },
         }
-    }
-
-    // Return the next character without incrementing the position
-    fn peek(&self) -> Option<char>
-    {
-        self.file.chars().last()
     }
 
     fn next(&mut self) -> Option<char>
     {
-        let c: char;
+        let next: char;
 
         match self.file.pop()
         {
-            Some(C) => c = C,
+            Some(c) => next = c,
             None => return None
         }
         
-        if c == '\n'
+        if next == '\n'
         {
             self.pos.line += 1;
             self.pos.col = 0;
@@ -47,7 +55,7 @@ impl SourceFile
             self.pos.col += 1;
         }
 
-        return Some(c);
+        return Some(next);
     }
 }
 
@@ -58,10 +66,11 @@ enum LexerState
     Other,
     Identifier,
     Number,
+    StringLiteral,
 }
 
 // Main lexing method
-pub fn lex(file: String) -> Vec<Token>
+pub fn lex(file: String) -> TokenStream
 {
     // Apply lexing rules:
     //  alpha: consume id characters until non-id character
@@ -72,159 +81,305 @@ pub fn lex(file: String) -> Vec<Token>
     let mut fitter = SourceFile::new(file);
 
     // Tokenised file
-    let mut tokens: Vec<Token> = Vec::new();
+    let mut tokens: TokenStream = TokenStream::new();
 
     // Persistent state for the loop below
     let mut lexerstate = LexerState::Other;
+    let mut escapeswitch = false;
 
     // Iterating over the characters in the file.
-    while let Some(C) = fitter.next()
+    while let Some(c) = fitter.next()
     {
         if let LexerState::Other = lexerstate
         {
-            if C.is_alphabetic()
+            if c.is_alphabetic()
             {
                 lexerstate = LexerState::Identifier;
-                tokens.push(
+                tokens.push_back(
                     Token
                     {
-                        tokenType: TokenType::Identifier,
-                        string:    C.to_string(),
-                        pos:       fitter.pos
+                        token_type: TokenType::Identifier,
+                        string:     c.to_string(),
+                        pos:        fitter.pos
                     }
                 )
             }
 
-            else if C.is_numeric()
+            else if c.is_numeric()
             {
                 lexerstate = LexerState::Number;
-                tokens.push(
+                tokens.push_back(
                     Token
                     {
-                        tokenType: TokenType::Number,
-                        string:    C.to_string(),
-                        pos:       fitter.pos
+                        token_type: TokenType::Number,
+                        string:     c.to_string(),
+                        pos:        fitter.pos
                     }
-                )
+                );
             }
 
-            else
+            else if c.is_whitespace()
             {
-                tokens.push(
+                continue;
+            }
+
+            else if c == '"' || c == '\''
+            {
+                lexerstate = LexerState::StringLiteral;
+                tokens.push_back(
                     Token
                     {
-                        tokenType: TokenType::Character,
-                        string:    C.to_string(),
-                        pos:       fitter.pos
+                        token_type: TokenType::StringLiteral,
+                        string:     String::new(),
+                        pos:        fitter.pos,
                     }
-                )
+                );
+            }
+            
+            else
+            {
+                tokens.push_back(
+                    Token
+                    {
+                        token_type: TokenType::Character,
+                        string:     c.to_string(),
+                        pos:        fitter.pos
+                    }
+                );
             }
         }
 
         else if let LexerState::Identifier = lexerstate
         {
-            if C.is_alphabetic() || C.is_numeric() || C == '_'
+            if c.is_alphabetic() || c.is_numeric() || c == '_'
             {
                 // Note: due to construction of state machine,
                 // the vector must always contain at least one element,
                 // so using unwrap() here is fine
-                let mut t = tokens.pop().unwrap();
-                t.string.push(C);
-                tokens.push(t);
+                let mut t = tokens.pop_back().unwrap();
+                t.string.push(c);
+                tokens.push_back(t);
             }
+
+            else if c.is_whitespace()
+            {
+                lexerstate = LexerState::Other;
+            }
+
+            else if c == '"' || c == '\''
+            {
+                lexerstate = LexerState::StringLiteral;
+                tokens.push_back(
+                    Token
+                    {
+                        token_type: TokenType::StringLiteral,
+                        string:     String::new(),
+                        pos:        fitter.pos,
+                    }
+                );
+            }
+
             else
             {
                 lexerstate = LexerState::Other;
-                tokens.push(
+                tokens.push_back(
                     Token
                     {
-                        tokenType: TokenType::Character,
-                        string:    C.to_string(),
-                        pos:       fitter.pos
+                        token_type: TokenType::Character,
+                        string:     c.to_string(),
+                        pos:        fitter.pos,
                     }
-                )
+                );
             }
         }
 
         else if let LexerState::Number = lexerstate
         {
-            if C.is_numeric() 
+            if c.is_numeric() 
             {
-                let mut t = tokens.pop().unwrap();
-                t.string.push(C);
-                tokens.push(t);
+                let mut t = tokens.pop_back().unwrap();
+                t.string.push(c);
+                tokens.push_back(t);
             }
+
+            else if c.is_whitespace()
+            {
+                lexerstate = LexerState::Other;
+            }
+
+            else if c == '"' || c == '\''
+            {
+                lexerstate = LexerState::StringLiteral;
+                tokens.push_back(
+                    Token
+                    {
+                        token_type: TokenType::StringLiteral,
+                        string:     String::new(),
+                        pos:        fitter.pos,
+                    }
+                );
+            }
+
             else
             {
                 lexerstate = LexerState::Other;
-                tokens.push(
+                tokens.push_back(
                     Token
                     {
-                        tokenType: TokenType::Character,
-                        string:    C.to_string(),
-                        pos:       fitter.pos
+                        token_type: TokenType::Character,
+                        string:     c.to_string(),
+                        pos:        fitter.pos,
                     }
-                )
+                );
+            }
+        }
+
+        else if let LexerState::StringLiteral = lexerstate
+        {
+            if (c == '"' || c == '\'') && !escapeswitch
+            {
+                lexerstate = LexerState::Other;
+            }
+
+            else if c == '\\'
+            {
+                escapeswitch = true;
+            }
+
+            else
+            {
+                escapeswitch = false;
+                let mut t = tokens.pop_back().unwrap();
+                t.string.push(c);
+                tokens.push_back(t);
             }
         }
     }
-    return tokens;
+
+    return process_keywords(tokens);
+}
+
+fn process_keywords(mut ts: TokenStream) -> TokenStream
+{
+    use lexer::RESERVED_WORDS;
+
+    let mut new_ts: TokenStream = TokenStream::new();
+
+    while let Some(mut t) = ts.pop_front()
+    {
+        if t.token_type == TokenType::Identifier
+        {
+            if RESERVED_WORDS.contains(&&*t.string)
+            {
+                t.token_type = TokenType::Keyword;
+            }
+        }
+
+        new_ts.push_back(t);
+    }
+
+    return new_ts;
 }
 
 #[cfg(test)]
 mod tests
 {
-    use super::*;
+    // Testing module for the lexer.
 
-    fn begin_test(test_string: String) -> Vec<Token>
+    use lexer::lex;
+    use token::TokenType;
+    use token::TokenType::*;
+    use token::printTS;
+
+    // Main lexer testing function
+    fn lexer_test
+    (
+        test_string: String,         // The string to be tested
+        num_tokens: usize,           // Expected number of tokens in the lexed string
+        token_types: Vec<TokenType>, // Expected types of the tokens
+        token_strings: Vec<&str>     // Expected values of the tokens
+    ) 
     {
-        println!("Test string: {}", test_string);
-        return lex(test_string)
+        let tokenstream = lex(test_string);
+        printTS(&tokenstream);
+
+        // Check that the lexer returns the expected number of tokens
+        assert_eq!(tokenstream.len(), num_tokens);
+
+        for ((token, ttype), tstring) in 
+            tokenstream.into_iter()
+            .zip(token_types.into_iter())
+            .zip(token_strings.into_iter())
+        {
+            // Check that each token is the expected type and value.
+            assert_eq!(token.token_type, ttype);
+            assert_eq!(token.string, tstring);
+        }
     }
 
     #[test]
     fn plain_int()
     {
-        let a = begin_test(String::from("1"));
-        assert_eq!(a.len(), 1);
-
-        let mut a = a.iter();
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
+        lexer_test(
+            String::from("1"),
+            1,
+            vec![Number],
+            vec!["1"],
+        );
     }
 
     #[test]
     fn quick_maths()
     {
-        // Should be list of tokens:
-        // Number("2")
-        // Plus
-        // Number("2")
-        // Dash
-        // Number("1")
-        // Semicolon
-        let a = begin_test(String::from("2+2-1;"));
-        assert_eq!(a.len(), 6);
-
-        let mut a = a.iter();
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
+        lexer_test(
+            String::from("2+2-1;"),
+            6,
+            vec![Number , Character , Number , Character , Number , Character],
+            vec!["2"    , "+"       , "2"    , "-"       , "1"    , ";"],
+        );
     }
 
     #[test]
     fn identifiers()
     {
-        let a = begin_test(String::from("hello world"));
-        // assert_eq!(a.len(), 2);
+        lexer_test(
+            String::from("hello world"),
+            2,
+            vec![Identifier , Identifier] ,
+            vec!["hello"    , "world"]    ,
+        );
+    }
 
-        let mut a = a.iter();
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
-        println!("{:?}", a.next());
+    #[test]
+    fn string_literal_1()
+    {
+        lexer_test(
+            String::from("\"hello\" for i"),
+            3,
+            vec![StringLiteral , Keyword , Identifier] ,
+            vec!["hello"       , "for"   , "i"]        ,
+        );
+    }
+
+    #[test]
+    fn string_literal_2()
+    {
+        lexer_test(
+            String::from("\"hello i am inside a string literal\", return good;"),
+            5,
+            vec![StringLiteral                        , Character , Keyword  , Identifier , Character] ,
+            vec!["hello i am inside a string literal" , ","       , "return" , "good"     , ";"] ,
+        );
+    }
+
+    #[test]
+    fn string_literal_3()
+    {
+        lexer_test(
+            String::from("'hello i am inside a string literal', return good;"),
+            5,
+            vec![StringLiteral                        , Character , Keyword  , Identifier , Character] ,
+            vec!["hello i am inside a string literal" , ","       , "return" , "good"     , ";"] ,
+        );
     }
 }

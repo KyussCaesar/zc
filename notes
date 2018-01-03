@@ -55,12 +55,73 @@ else
 
 grammar:
 
-file:
-    statements
-    class definitions
-    trait definitions
-    lonely function definitions
+program:
+    statement*
 
 statement:
-    variable declaration
-    expression
+    class definition
+    trait definition
+    function definition
+    variable_declaration ';'
+    assignment ';'
+    expression ';'
+
+class definition:
+    'class' identifier ('is' identifier (',' identifier)*)* '{' class-stuff* '}'
+
+class-stuff:
+    class definition
+    function definition
+    variable declaration ';'
+
+function definition:
+    'func' '(' identifier (',' identifier)* ','? ('->' identifier)? '{' func-stuff* '}'
+
+func-stuff:
+    variable declaration ';'
+    assignment ';'
+    expression ';'
+    return ';'
+
+variable-declaration:
+    'var' identifier ?(':' identifier)
+
+assign-lhs:
+    identifier
+    variable-declaration
+
+assignment:
+    assign-lhs 'takes' expression ';'       # takes ownership
+    assign-lhs 'borrows' expression ';'     # mut ref
+    assign-lhs 'references' expression ';'  # ref
+    assign-lhs 'copies' expression ';'      # copy
+
+expression:
+    if
+    use
+    term ('+' term)*
+
+if:
+    'if' expression '{' (statement|yield)* '}'
+
+yield:
+    'yield' expression ';'
+
+use:
+    'use' ('(' argument-list ')')? '{' (statement|yield)* '}'
+
+function call:
+    identifier '(' argument-list? ')'
+
+term:
+    factor ('*' factor)*
+
+factor:
+    '(' expression ')'
+    function call
+    object literal
+    identifier
+    number literal
+
+argument-list:
+    expression (',' expression)* ','?

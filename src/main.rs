@@ -1,7 +1,7 @@
-mod lexer;
-use lexer::lex;
-
 mod token;
+mod lexer;
+mod parser;
+mod grammar2;
 
 fn main()
 {
