@@ -8,26 +8,33 @@ use lexer::lex;
 //
 // String: The name of the rule
 // Rule: The rule.
+#[derive(Clone)]
 struct Grammar(HashMap<String, Rule>);
 
+#[derive(Clone)]
 struct Rule(Vec<Case>);
 
+#[derive(Clone)]
 struct Case(Vec<ModifiedGroup>);
 
+#[derive(Clone, PartialEq, Debug)]
 enum Modifier
 {
     ZeroOrOne,
     ZeroOrMore,
     OneOrMore,
 }
+#[derive(Clone)]
 struct ModifiedGroup(Option<Modifier>, Group);
 
+#[derive(Clone)]
 enum Group
 {
     Single(Unit),
     Many(Vec<ModifiedGroup>),
 }
 
+#[derive(Debug, Clone)]
 enum Unit
 {
     Terminal(String),
@@ -155,6 +162,10 @@ fn basic_checks(rules: Vec<String>) -> Result<Vec<TokenStream>, String>
     return Ok(results);
 }
 
+// The result of calling the 6 functions below.
+// If a function encounters an error, then it emits an error message and tells
+// the next function in the call stack that it has done so, by returning the Error
+// value
 enum BuildResult<T>
 {
     New(T),
@@ -373,7 +384,7 @@ fn build_group(ts: &mut TokenStream) -> BuildResult<Group>
     };
 
     // Repeated case: braces followed by at least one modified group
-    if t.string == "(".to_string()
+    if t.string == "(".to_string() && t.token_type == TokenType::Character
     {       
         trace!("[build_group] found compound group opening brace");
         let mut mgs: Vec<ModifiedGroup> = Vec::new();
@@ -518,14 +529,6 @@ fn build_unit(ts: &mut TokenStream) -> BuildResult<Unit>
     }
 }
 
-// fn parse_with_grammar(grammar: Grammar, ts: TokenStream) -> AST
-// {
-// }
-
-// fn parse_rule(rule: Rule, ptr: TsIter) -> AST
-// {
-// }
-
 #[cfg(test)]
 mod tests
 {
@@ -589,6 +592,204 @@ mod tests
         basic_checks_meta(vec!["basic: identifier".to_string()]);
     }
 
+    // Compares two grammars
+    // Used for testing
+    fn cmp_grammar(g1: Grammar, g2: Grammar)
+    {
+        info!("Comparing two grammars");
+
+        // Extract hashmaps
+        let Grammar(mut g1) = g1;
+        let Grammar(mut g2) = g2;
+
+        // They should have the same number of keys
+        assert_eq!(g1.keys().count(), g2.keys().count(),
+            "the grammars have a different number of keys");
+
+        // Now we check each key in sequence
+        for key in g1.keys()
+        {
+            assert!(g2.contains_key(key), "key '{}' is contained in g1 but not g2");
+        }
+
+        for key in g2.keys()
+        {
+            assert!(g1.contains_key(key), "key '{}' is contained in g2 but not g1");
+        }
+
+        // Now check each rule in sequence
+        for key in g1.clone().keys()
+        {
+            let r1 = match g1.remove(key)
+            {
+                Some(r1) => r1,
+                None => panic!("SHOULD NOT HAPPEN"),
+            };
+
+            let r2 = match g2.remove(key)
+            {
+                Some(r2) => r2,
+                None => panic!("SHOULD NOT HAPPEN"),
+            };
+
+            assert!(cmp_rule(r1, r2), "rules '{}' do not match", key);
+        }
+
+        info!("Success!");
+    }
+
+    // interface:
+    // each function returns true false
+    // if the function is to return false then it should emit the error message first
+    // only the top level function can panic
+
+    // emits an error and returns false
+    macro_rules! err_false
+    {
+        ( $error_s:expr, $( $args:expr ),* ) =>
+        {{
+            error!($error_s, $($args),*);
+            return false;
+        }};
+
+        ( $error_s:expr ) =>
+        {{
+            error!($error_s);
+            return false;
+        }};
+    }
+
+    // emits an error if the expression evaluates to false
+    macro_rules! error_if
+    {
+        ( $a:expr, $error_s:expr, $( $args:expr ),* ) =>
+            { if $a { err_false!($error_s, $($args),*); } };
+
+        ( $a:expr, $error_s:expr ) =>
+            { if $a { err_false!($error_s); } };
+    }
+
+    // emits an error if the two args are not equal
+    macro_rules! error_if_neq
+    {
+        ( $a:expr, $b:expr, $error_s:expr, $( $args:expr ),* ) =>
+            { error_if!($a != $b, $error_s, $($args),*); };
+
+        ( $a:expr, $b:expr, $error_s:expr ) =>
+            { error_if!($a != $b, $error_s); }
+    }
+
+    fn cmp_rule(r1: Rule, r2: Rule) -> bool
+    {
+        // extract vector of cases
+        let Rule(r1) = r1;
+        let Rule(r2) = r2;
+
+        // assert same number of cases
+        error_if_neq!(r1.len(), r2.len(), "rules have different number of cases: r1: {}\tr2: {}", r1.len(), r2.len());
+
+        for ((i, case_a), case_b) in r1.into_iter().enumerate().zip(r2.into_iter())
+        {
+            error_if!(cmp_case(case_a, case_b), "FAILURE! case {} failed", i);
+        }
+
+        return true;
+    }
+
+    fn cmp_case(c1: Case, c2: Case) -> bool
+    {
+        // extract vector of modified groups
+        let Case(c1) = c1;
+        let Case(c2) = c2;
+
+        error_if_neq!(c1.len(), c2.len(), "cases have different number of mgroups: c1: {}\tc2: {}", c1.len(), c2.len());
+
+        for ((i, mga), mgb) in c1.into_iter().enumerate().zip(c2.into_iter())
+        {
+            error_if!(cmp_mgroup(mga, mgb), "FAILURE! mgroup {} failed", i);
+        }
+
+        return true;
+    }
+
+    fn cmp_mgroup(m1: ModifiedGroup, m2: ModifiedGroup) -> bool
+    {
+        // extract components
+        let ModifiedGroup(m1, g1) = m1;
+        let ModifiedGroup(m2, g2) = m2;
+
+        // Check modifiers
+        match (m1, m2)
+        {
+            (Some(a), Some(b)) => {error_if_neq!(a, b, "modified groups had different modifers: a: {:?}\tb: {:?}", a, b);},
+            (None, None)       => (),
+            (Some(a), None)    => {err_false!("m1 had modifier: {:?}, m2 had no modifier", a)},
+            (None, Some(b))    => {err_false!("m2 had modifier: {:?}, m1 had no modifier", b)},
+        }
+
+        error_if!(cmp_group(g1, g2), "modified groups had different groups");
+
+        return true;
+    }
+
+    fn cmp_group(g1: Group, g2: Group) -> bool
+    {
+        use grammar::Group::*;
+
+        match (g1, g2)
+        {
+            (Single(u1) , Single(u2)) =>
+            {
+                error_if!(
+                    cmp_unit(u1, u2),
+                    "Both groups were Group::Single, but the units were different"
+                );
+            },
+            (Many(v1), Many(v2)) =>
+            {
+                error_if_neq!(
+                    v1.len(), v2.len(),
+                    "found two groups of many, but they had a different number of elements: v1: {}\tv2: {}", v1.len(), v2.len()
+                );
+
+                for ((i, mg1), mg2) in v1
+                    .into_iter()
+                    .enumerate()
+                    .zip(v2.into_iter())
+                {
+                    error_if!(
+                        cmp_mgroup(mg1, mg2),
+                        "found group of many, but sub-group {} differed",
+                        i
+                    );
+                }
+            },
+            (Single(_), Many(_)) => err_false!("g1 was Single, g2 was Many"),
+            (Many(_), Single(_)) => err_false!("g1 was Many, g1 was Single"),
+        }
+
+        return true;
+    }
+
+    fn cmp_unit(u1: Unit, u2: Unit) -> bool
+    {
+        use grammar::Unit::*;
+
+        match (&u1, &u2)
+        {
+            ( &Terminal(ref s1)    , &Terminal(ref s2)    ) => {error_if_neq!(s1, s2, "both units were terminals but they were different: u1: {} u2: {}", s1, s2)},
+            ( &NonTerminal(ref s1) , &NonTerminal(ref s2) ) => {error_if_neq!(s1, s2, "both units were non-terminals but they were different: u1: {} u2: {}", s1, s2)},
+            ( &Identifier          , &Identifier          ) => (),
+            ( &Or                  , &Or                  ) => (),
+
+            // cbf writing out all 12 failure cases
+            _ => {err_false!("units were different variants: u1: {:?}\tu2: {:?}", &u1, &u2)},
+        }
+
+        return true;
+    }
+
+
     fn big_tests_init
     (
         grammarspec      : Vec<String>, // The grammar to parse
@@ -602,7 +803,12 @@ mod tests
         // rules in it.
 
         // Initialise logger
-        simple_logger::init().unwrap();
+        match simple_logger::init()
+        {
+            Ok(_) => (),
+            Err(_) => (),
+        }
+
         println!(""); // So that logging output begins on a new line
 
         use grammar::BuildResult::*;
@@ -786,6 +992,171 @@ mod tests
     #[test]
     fn expression()
     {
+        // tests a reduced form of grammar for parsing expressions
 
+        let Grammar(grammar) = big_tests_init(
+            vec!
+            [
+                "expression:
+                    term *(('+'|'-') term);".to_string(),
+                "term:
+                    factor *(('*'|'/') factor);".to_string(),
+                "factor:
+                    identifier;
+                    '(' expression ')';
+                    '-' factor;".to_string(),
+            ],
+            3,
+            vec!["expression".to_string(), "term".to_string(), "factor".to_string()],
+        );
+
+        let expr_manual =
+        Rule(vec!
+        {
+            Case(vec!
+            [
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::NonTerminal( "term".to_string() ))
+                ),
+                ModifiedGroup
+                (
+                    Some(Modifier::ZeroOrMore),
+                    Group::Many(vec!
+                    [
+                        ModifiedGroup
+                        (
+                            None,
+                            Group::Many(vec!
+                            [
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Terminal( "+".to_string() ))
+                                ),
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Or),
+                                ),
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Terminal( "-".to_string() ))
+                                )
+                            ])
+                        ),
+                        ModifiedGroup
+                        (
+                            None,
+                            Group::Single(Unit::NonTerminal( "term".to_string() ))
+                        )
+                    ])
+                )
+            ])
+        });
+
+        let term_manual =
+        Rule(vec!
+        {            
+            Case(vec!
+            [
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::NonTerminal( "factor".to_string() ))
+                ),
+                ModifiedGroup
+                (
+                    Some(Modifier::ZeroOrMore),
+                    Group::Many(vec!
+                    [
+                        ModifiedGroup
+                        (
+                            None,
+                            Group::Many(vec!
+                            [
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Terminal( "*".to_string() ))
+                                ),
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Or),
+                                ),
+                                ModifiedGroup
+                                (
+                                    None,
+                                    Group::Single(Unit::Terminal( "/".to_string() ))
+                                )
+                            ])
+                        ),
+                        ModifiedGroup
+                        (
+                            None,
+                            Group::Single(Unit::NonTerminal( "factor".to_string() ))
+                        )
+                    ])
+                )
+            ])
+        });
+
+        let factor_manual =
+        Rule(vec!
+        {            
+            Case(vec!
+            [
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::Identifier)
+                )
+            ]),
+            Case(vec!
+            [
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::Terminal("(".to_string() )),
+                ),
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::NonTerminal("expression".to_string() ))
+                ),
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::Terminal(")".to_string() )),
+                )
+            ]),
+            Case(vec!
+            [
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::Terminal("-".to_string())),
+                ),
+                ModifiedGroup
+                (
+                    None,
+                    Group::Single(Unit::NonTerminal("factor".to_string() ))
+                ),
+            ]),
+        });
+
+        let mut grammar_manual: HashMap<String, Rule> = HashMap::new();
+
+        grammar_manual.insert("expression".to_string(), expr_manual);
+        grammar_manual.insert("term".to_string(), term_manual);
+        grammar_manual.insert("factor".to_string(), factor_manual);
+
+        cmp_grammar(
+            Grammar(grammar_manual),
+            Grammar(grammar)
+        );
     }
 }
